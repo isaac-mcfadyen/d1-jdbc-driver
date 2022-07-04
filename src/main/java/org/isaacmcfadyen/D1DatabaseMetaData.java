@@ -74,12 +74,12 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public String getDatabaseProductVersion() throws SQLException {
-        return "UNKNOWN";
+        return null;
     }
 
     @Override
     public String getDriverName() throws SQLException {
-        return "Cloudflare D1";
+        return "D1 JDBC Driver";
     }
 
     @Override
