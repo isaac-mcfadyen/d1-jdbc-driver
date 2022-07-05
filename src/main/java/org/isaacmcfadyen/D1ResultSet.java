@@ -57,7 +57,7 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public String getString(int columnIndex) throws SQLException {
-        if (rows.get(currentRow - 1).get(columnIndex - 1).getClass() != JSONObject.NULL) {
+        if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnIndex - 1))) {
             return (String) rows.get(currentRow - 1).get(columnIndex - 1);
         } else {
             return null;
@@ -81,7 +81,7 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public int getInt(int columnIndex) throws SQLException {
-        if (rows.get(currentRow - 1).get(columnIndex - 1).getClass() != JSONObject.NULL) {
+        if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnIndex - 1))) {
             return (int) rows.get(currentRow - 1).get(columnIndex - 1);
         } else {
             return 0;
@@ -100,7 +100,7 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public double getDouble(int columnIndex) throws SQLException {
-        if (rows.get(currentRow - 1).get(columnIndex - 1).getClass() != JSONObject.NULL) {
+        if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnIndex - 1))) {
             return (double) rows.get(currentRow - 1).get(columnIndex - 1);
         } else {
             return 0;
@@ -149,7 +149,7 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public String getString(String columnLabel) throws SQLException {
-        if (rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel)).getClass() != JSONObject.NULL) {
+        if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel)))) {
             return (String) rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel));
         } else {
             return null;
@@ -173,7 +173,7 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public int getInt(String columnLabel) throws SQLException {
-        if (rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel)).getClass() != JSONObject.NULL) {
+        if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel)))) {
             return (int) rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel));
         } else {
             return 0;
@@ -192,7 +192,7 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public double getDouble(String columnLabel) throws SQLException {
-        if(rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel)).getClass() != JSONObject.NULL) {
+        if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel)))) {
             return (double) rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel));
         } else {
             return 0;
