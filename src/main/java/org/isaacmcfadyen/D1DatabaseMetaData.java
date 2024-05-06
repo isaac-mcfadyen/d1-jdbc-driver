@@ -963,17 +963,99 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public ResultSet getImportedKeys(String catalog, String schema, String table) throws SQLException {
-        throw new SQLException("Not implemented: getImportedKeys()");
+        return getCrossReference(null, null, null, catalog, schema, table);
     }
 
     @Override
     public ResultSet getExportedKeys(String catalog, String schema, String table) throws SQLException {
-        throw new SQLException("Not implemented: getExportedKeys()");
+        return getCrossReference(null, null, null, catalog, schema, table);
     }
 
     @Override
     public ResultSet getCrossReference(String parentCatalog, String parentSchema, String parentTable, String foreignCatalog, String foreignSchema, String foreignTable) throws SQLException {
-        throw new SQLException("Not implemented: getCrossReference()");
+        ArrayList<String> columnNames = new ArrayList<>();
+        columnNames.add("PKTABLE_CAT");
+        columnNames.add("PKTABLE_SCHEM");
+        columnNames.add("PKTABLE_NAME");
+        columnNames.add("PKCOLUMN_NAME");
+        columnNames.add("FKTABLE_CAT");
+        columnNames.add("FKTABLE_SCHEM");
+        columnNames.add("FKTABLE_NAME");
+        columnNames.add("FKCOLUMN_NAME");
+        columnNames.add("KEY_SEQ");
+        columnNames.add("UPDATE_RULE");
+        columnNames.add("DELETE_RULE");
+        columnNames.add("FK_NAME");
+        columnNames.add("PK_NAME");
+
+        JSONObject stringType = new JSONObject();
+        stringType.put("type", "TEXT");
+        JSONObject intType = new JSONObject();
+        intType.put("type", "INTEGER");
+
+        JSONArray columnSchema = new JSONArray();
+        // PKTABLE_CAT
+        columnSchema.put(stringType);
+        // PKTABLE_SCHEM
+        columnSchema.put(stringType);
+        // PKTABLE_NAME
+        columnSchema.put(stringType);
+        // PKCOLUMN_NAME
+        columnSchema.put(stringType);
+        // FKTABLE_CAT
+        columnSchema.put(stringType);
+        // FKTABLE_SCHEM
+        columnSchema.put(stringType);
+        // FKTABLE_NAME
+        columnSchema.put(stringType);
+        // FKCOLUMN_NAME
+        columnSchema.put(stringType);
+        // KEY_SEQ
+        columnSchema.put(intType);
+        // UPDATE_RULE
+        columnSchema.put(intType);
+        // DELETE_RULE
+        columnSchema.put(intType);
+        // FK_NAME
+        columnSchema.put(stringType);
+        // PK_NAME
+        columnSchema.put(stringType);
+
+        JSONObject ruleType = new JSONObject();
+        ruleType.put("NO ACTION", DatabaseMetaData.importedKeyNoAction);
+        ruleType.put("CASCADE", DatabaseMetaData.importedKeyCascade);
+        ruleType.put("SET NULL", DatabaseMetaData.importedKeySetNull);
+        ruleType.put("SET DEFAULT", DatabaseMetaData.importedKeySetDefault);
+        ruleType.put("RESTRICT", DatabaseMetaData.importedKeyRestrict);
+
+        JSONObject results = queryDatabase("PRAGMA foreign_key_list(" + foreignTable + ")");
+        JSONArray fkList = results.getJSONArray("results");
+        ArrayList<ArrayList<Object>> rows = new ArrayList<>();
+
+        for (int i = 0; i < fkList.length(); i++) {
+            JSONObject fkItem = fkList.getJSONObject(i);
+
+            ArrayList<Object> row = new ArrayList<>();
+            row.add(null);
+            row.add(null);
+            row.add(fkItem.get("table"));
+            row.add(fkItem.get("to"));
+            row.add(null);
+            row.add(null);
+            row.add(foreignTable);
+            row.add(fkItem.get("from"));
+            row.add(fkItem.get("seq"));
+            row.add(ruleType.get(fkItem.get("on_update").toString()));
+            row.add(ruleType.get(fkItem.get("on_delete").toString()));
+
+            // If null is set, #FAKE_<table>_<number> is set, so <foreignTable>_<id>_<seq> set
+            row.add(foreignTable + "_" + fkItem.get("id").toString() + "_" + fkItem.get("seq").toString());
+            row.add(null);
+
+            rows.add(row);
+        }
+
+        return new D1ResultSet(ApiKey, AccountId, DatabaseUuid, columnNames, rows, columnSchema);
     }
 
     @Override
