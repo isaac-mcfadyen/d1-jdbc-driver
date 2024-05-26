@@ -26,13 +26,13 @@ public class D1Statement extends D1Queryable implements Statement {
 
     @Override
     public ResultSet executeQuery(String sql) throws SQLException {
-        JSONObject json = queryDatabase(sql);
+        JSONObject json = queryDatabase(sql, null);
         return generateResultSet(json, sql);
     }
 
     @Override
     public int executeUpdate(String sql) throws SQLException {
-        queryDatabase(sql);
+        queryDatabase(sql, null);
         return 0;
     }
 
@@ -103,7 +103,7 @@ public class D1Statement extends D1Queryable implements Statement {
 
     @Override
     public boolean execute(String sql) throws SQLException {
-        JSONObject json = queryDatabase(sql);
+        JSONObject json = queryDatabase(sql, null);
         currentResultSet = generateResultSet(json, sql);
         return json.getJSONArray("results").length() > 0;
     }
@@ -179,7 +179,7 @@ public class D1Statement extends D1Queryable implements Statement {
 
     @Override
     public ResultSet getGeneratedKeys() throws SQLException {
-        throw new SQLException("Not implemented: getGeneratedKeys()");
+        throw new SQLFeatureNotSupportedException();
     }
 
     @Override
