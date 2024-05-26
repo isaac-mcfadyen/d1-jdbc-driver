@@ -2,36 +2,82 @@ package org.isaacmcfadyen;
 
 import org.json.JSONObject;
 import org.json.JSONArray;
+import sun.jvm.hotspot.debugger.cdbg.Sym;
 
 import java.io.InputStream;
 import java.io.Reader;
 import java.math.BigDecimal;
 import java.net.URL;
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Map;
+import java.sql.Date;
+import java.util.*;
+import java.util.logging.Logger;
 
 public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
+    private final Logger logger = Logger.getLogger(D1ResultSet.class.getName());
     private boolean closed = false;
-    private final ArrayList<String> columnNames = new ArrayList<>();
-    private final ArrayList<ArrayList<Object>> rows = new ArrayList<>();
+
+    // This is 0 and not -1 because JDBC is 1-indexed.
     private int currentRow = 0;
 
-    private final JSONArray columnSchema;
+    private final List<String> columnNames = new ArrayList<>();
+    private final List<List<Object>> rows = new ArrayList<>();
+    private final List<JSONObject> columnSchema;
+    private String tableName = null;
 
     D1ResultSet(
-            String ApiKey,
-            String AccountId,
-            String DatabaseUuid,
-            ArrayList<String> columnNames,
-            ArrayList<ArrayList<Object>> rows,
-            JSONArray columnSchema
+            String apiToken,
+            String accountId,
+            String databaseId,
+            List<List<Object>> rows,
+            List<String> columnNames,
+            List<JSONObject> columnSchema
     ) {
-        super(ApiKey, AccountId, DatabaseUuid);
+        super(apiToken, accountId, databaseId);
         this.columnNames.addAll(columnNames);
         this.rows.addAll(rows);
         this.columnSchema = columnSchema;
+    }
+
+    /// Utility method for easily creating an empty ResultSet.
+    public static D1ResultSet empty(
+            String apiToken,
+            String accountId,
+            String databaseId,
+            List<String> columnNames,
+            List<JSONObject> columnSchema
+    ) {
+        return new D1ResultSet(apiToken, accountId, databaseId, new ArrayList<>(), columnNames, columnSchema);
+    }
+
+    private void checkOutOfBounds() throws SQLException {
+        // JDBC is 1-indexed.
+        if (this.currentRow >= this.rows.size() + 1) {
+            System.err.println("Trying to access row " + this.currentRow + " but there are only " + this.rows.size() + " rows.");
+            throw new SQLException("Row out of bounds");
+        }
+    }
+
+    private synchronized void checkClosed() throws SQLException {
+        if (this.closed) {
+            throw new SQLException("ResultSet is closed");
+        }
+    }
+
+    /**
+     * Gets the number of rows in the result set.
+     * @return The number of rows in the result set.
+     */
+    public int getRowCount() {
+        return rows.size();
+    }
+
+    /**
+     * Sets the table name for use in metadata.
+     * @param tableName The name of the table that this result set originated from.
+     */
+    public void setTableName(String tableName) {
+        this.tableName = tableName;
     }
 
     @Override
@@ -44,10 +90,8 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
     }
 
     @Override
-    public void close() throws SQLException {
-        synchronized (this) {
-            closed = true;
-        }
+    public synchronized void close() throws SQLException {
+        closed = true;
     }
 
     @Override
@@ -57,6 +101,8 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public String getString(int columnIndex) throws SQLException {
+        checkClosed();
+        checkOutOfBounds();
         if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnIndex - 1))) {
             return (String) rows.get(currentRow - 1).get(columnIndex - 1);
         } else {
@@ -81,6 +127,8 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public int getInt(int columnIndex) throws SQLException {
+        checkClosed();
+        checkOutOfBounds();
         if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnIndex - 1))) {
             return (int) rows.get(currentRow - 1).get(columnIndex - 1);
         } else {
@@ -100,6 +148,8 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public double getDouble(int columnIndex) throws SQLException {
+        checkClosed();
+        checkOutOfBounds();
         if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnIndex - 1))) {
             return (double) rows.get(currentRow - 1).get(columnIndex - 1);
         } else {
@@ -149,6 +199,8 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public String getString(String columnLabel) throws SQLException {
+        checkClosed();
+        checkOutOfBounds();
         if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel)))) {
             return (String) rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel));
         } else {
@@ -173,6 +225,8 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public int getInt(String columnLabel) throws SQLException {
+        checkClosed();
+        checkOutOfBounds();
         if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel)))) {
             return (int) rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel));
         } else {
@@ -192,6 +246,8 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public double getDouble(String columnLabel) throws SQLException {
+        checkClosed();
+        checkOutOfBounds();
         if (!JSONObject.NULL.equals(rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel)))) {
             return (double) rows.get(currentRow - 1).get(columnNames.indexOf(columnLabel));
         } else {
@@ -256,18 +312,24 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public ResultSetMetaData getMetaData() throws SQLException {
-        return new D1ResultSetMetaData(ApiKey, AccountId, DatabaseUuid, columnNames, rows, columnSchema);
+        D1ResultSetMetaData meta = new D1ResultSetMetaData(apiToken, accountId, databaseId, columnNames, rows, columnSchema);
+        meta.setTableName(tableName);
+        return meta;
     }
 
     @Override
     public Object getObject(int columnIndex) throws SQLException {
-        ArrayList<Object> row = rows.get(currentRow - 1);
+        checkClosed();
+        checkOutOfBounds();
+        List<Object> row = rows.get(currentRow - 1);
         return row.get(columnIndex - 1);
     }
 
     @Override
     public Object getObject(String columnLabel) throws SQLException {
-        ArrayList<Object> row = rows.get(currentRow - 1);
+        checkClosed();
+        checkOutOfBounds();
+        List<Object> row = rows.get(currentRow - 1);
         return row.get(columnNames.indexOf(columnLabel));
     }
 
@@ -328,7 +390,7 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public boolean first() throws SQLException {
-        if (rows.size() > 0) {
+        if (!rows.isEmpty()) {
             currentRow = 1;
             return true;
         } else {
@@ -338,7 +400,7 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public boolean last() throws SQLException {
-        if (rows.size() > 0) {
+        if (!rows.isEmpty()) {
             currentRow = rows.size();
             return true;
         } else {
@@ -388,7 +450,6 @@ public class D1ResultSet extends D1Queryable implements java.sql.ResultSet {
 
     @Override
     public void setFetchSize(int rows) throws SQLException {
-        throw new SQLException("Not implemented: setFetchSize(int rows)");
     }
 
     @Override

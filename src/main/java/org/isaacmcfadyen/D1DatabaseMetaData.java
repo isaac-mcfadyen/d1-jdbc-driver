@@ -3,19 +3,13 @@ package org.isaacmcfadyen;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.lang.reflect.Type;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.Objects;
-import java.util.stream.Collectors;
+import java.util.*;
+import java.util.regex.Pattern;
 
 public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData {
     private final D1Connection parentConnection;
+
 
     D1DatabaseMetaData(String ApiKey, String AccountId, String DatabaseUuid, D1Connection connection) {
         super(ApiKey, AccountId, DatabaseUuid);
@@ -34,7 +28,7 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public String getURL() throws SQLException {
-        return String.format("jbdc:d1://%s", DatabaseUuid);
+        return String.format("jbdc:d1://%s", databaseId);
     }
 
     @Override
@@ -69,12 +63,12 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public String getDatabaseProductName() throws SQLException {
-        return "Cloudflare D1";
+        return "SQLite";
     }
 
     @Override
     public String getDatabaseProductVersion() throws SQLException {
-        return null;
+        return "3.45.1";
     }
 
     @Override
@@ -99,7 +93,7 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public boolean usesLocalFiles() throws SQLException {
-        return false;
+        return true;
     }
 
     @Override
@@ -109,7 +103,7 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public boolean supportsMixedCaseIdentifiers() throws SQLException {
-        return false;
+        return true;
     }
 
     @Override
@@ -174,7 +168,8 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public String getTimeDateFunctions() throws SQLException {
-        throw new SQLException("Not implemented: getTimeDateFunctions()");
+        // Ref; https://github.com/xerial/sqlite-jdbc/blob/master/src/main/java/org/sqlite/jdbc3/JDBC3DatabaseMetaData.java
+        return "DATE,TIME,DATETIME,JULIANDAY,STRFTIME";
     }
 
     @Override
@@ -324,27 +319,27 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public String getSchemaTerm() throws SQLException {
-        return null;
+        return "schema";
     }
 
     @Override
     public String getProcedureTerm() throws SQLException {
-        return "Procedure";
+        return "not_implemented";
     }
 
     @Override
     public String getCatalogTerm() throws SQLException {
-        return null;
+        return "catalog";
     }
 
     @Override
     public boolean isCatalogAtStart() throws SQLException {
-        return false;
+        return true;
     }
 
     @Override
     public String getCatalogSeparator() throws SQLException {
-        throw new SQLException("Not implemented: getCatalogSeparator()");
+        return ".";
     }
 
     @Override
@@ -624,262 +619,255 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public ResultSet getTables(String catalog, String schemaPattern, String tableNamePattern, String[] types) throws SQLException {
-        JSONObject json = queryDatabase("PRAGMA table_list");
+        JSONObject json = queryDatabase("PRAGMA table_list", null);
         JSONArray tables = json.getJSONArray("results");
 
-        ArrayList<String> columnNames = new ArrayList<>();
-        ArrayList<ArrayList<Object>> rows = new ArrayList<>();
+        List<String> columnNames = Arrays.asList(
+                "TABLE_CAT",
+                "TABLE_SCHEM",
+                "TABLE_NAME",
+                "TABLE_TYPE",
+                "REMARKS",
+                "TYPE_CAT",
+                "TYPE_SCHEM",
+                "TYPE_NAME",
+                "SELF_REFERENCING_COL_NAME",
+                "REF_GENERATION"
+        );
 
-        // Define the preset columns.
-        columnNames.add("TABLE_CAT");
-        columnNames.add("TABLE_SCHEM");
-        columnNames.add("TABLE_NAME");
-        columnNames.add("TABLE_TYPE");
-
+        List<List<Object>> rows = new ArrayList<>();
         for (int i = 0; i < tables.length(); i++) {
-            ArrayList<Object> row = new ArrayList<>();
+            List<Object> row = new ArrayList<>();
             JSONObject table = tables.getJSONObject(i);
 
-            String tableCatalog = null;
             String tableSchema = table.getString("schema");
             String tableName = table.getString("name");
-            String tableType = table.getString("type");
 
-            row.add(tableCatalog);
-            row.add(tableSchema);
-            row.add(tableName);
-            row.add(tableType);
+            // Ignore the table if it's not in the "main" schema.
+            // Other schemas are SQLite internal and we don't need to expose them.
+            if (!tableSchema.equals("main")) {
+                continue;
+            }
+
+            // Ignore the _cf_KV table.
+            // This is a special table used internally by Cloudflare and shouldn't be exposed to the user or queried.
+            // Reference: https://x.com/KentonVarda/status/1770241360722846120
+            if (tableName.equals("_cf_KV")) {
+                continue;
+            }
+
+            // sqlite_sequence, sqlite_schema, and sqlite_temp_schema are system tables.
+            String tableType = "TABLE";
+            if (
+                    tableName.equals("sqlite_sequence") ||
+                            tableName.equals("sqlite_schema") ||
+                            tableName.equals("sqlite_temp_schema")
+            ) {
+                tableType = "SYSTEM TABLE";
+            }
+
+            row.add(null); // TABLE_CAT
+            row.add(null); // TABLE_SCHEM
+            row.add(tableName); // TABLE_NAME
+            row.add(tableType); // TABLE_TYPE
+            row.add(null); // REMARKS
+            row.add(null); // TYPE_CAT
+            row.add(null); // TYPE_SCHEM
+            row.add(null); // TYPE_NAME
+            row.add(null); // SELF_REFERENCING_COL_NAME
+            row.add(null); // REF_GENERATION
 
             rows.add(row);
         }
 
-        JSONObject stringType = new JSONObject();
-        stringType.put("type", "TEXT");
-        JSONArray columnSchema = new JSONArray();
-        columnSchema.put(stringType);
-        columnSchema.put(stringType);
-        columnSchema.put(stringType);
-        columnSchema.put(stringType);
+        List<JSONObject> columnSchema = Arrays.asList(
+                new JSONObject().put("type", "TEXT"), // TABLE_CAT
+                new JSONObject().put("type", "TEXT"), // TABLE_SCHEM
+                new JSONObject().put("type", "TEXT"), // TABLE_NAME
+                new JSONObject().put("type", "TEXT"), // TABLE_TYPE
+                new JSONObject().put("type", "TEXT"), // REMARKS
+                new JSONObject().put("type", "TEXT"), // TYPE_CAT
+                new JSONObject().put("type", "TEXT"), // TYPE_SCHEM
+                new JSONObject().put("type", "TEXT"), // TYPE_NAME
+                new JSONObject().put("type", "TEXT"), // SELF_REFERENCING_COL_NAME
+                new JSONObject().put("type", "TEXT") // REF_GENERATION
+        );
 
-        return new D1ResultSet(ApiKey, AccountId, DatabaseUuid, columnNames, rows, columnSchema);
+        System.out.println("Tables: " + rows);
+        return new D1ResultSet(apiToken, accountId, databaseId, rows, columnNames, columnSchema);
     }
 
     @Override
     public ResultSet getSchemas() throws SQLException {
-        ArrayList<String> columnNames = new ArrayList<>();
-        ArrayList<ArrayList<Object>> rows = new ArrayList<>();
-
-        columnNames.add("TABLE_SCHEM");
-        columnNames.add("TABLE_CATALOG");
-
-        ArrayList<Object> row = new ArrayList<>();
-        row.add(null);
-        row.add(null);
-        rows.add(row);
-
-        JSONObject stringType = new JSONObject();
-        stringType.put("type", "TEXT");
-        JSONArray columnSchema = new JSONArray();
-        columnSchema.put(stringType);
-        columnSchema.put(stringType);
-
-        return new D1ResultSet(ApiKey, AccountId, DatabaseUuid, columnNames, rows, columnSchema);
+        return D1ResultSet.empty(
+                apiToken, accountId, databaseId,
+                Arrays.asList("TABLE_SCHEM", "TABLE_CATALOG"),
+                Arrays.asList(
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "TEXT")
+                )
+        );
     }
 
     @Override
     public ResultSet getCatalogs() throws SQLException {
-        return null;
+        return D1ResultSet.empty(
+                apiToken, accountId, databaseId,
+                Collections.singletonList("TABLE_CAT"),
+                Collections.singletonList(
+                        new JSONObject().put("type", "TEXT")
+                )
+        );
     }
 
     @Override
     public ResultSet getTableTypes() throws SQLException {
-        ArrayList<String> columnNames = new ArrayList<>();
-        ArrayList<ArrayList<Object>> rows = new ArrayList<>();
-
-        columnNames.add("TABLE_TYPE");
-        ArrayList<Object> row = new ArrayList<>();
-        row.add("TABLE");
-        rows.add(row);
-
-        JSONObject stringType = new JSONObject();
-        stringType.put("type", "TEXT");
-        JSONArray columnSchema = new JSONArray();
-        columnSchema.put(stringType);
-
-        return new D1ResultSet(ApiKey, AccountId, DatabaseUuid, columnNames, rows, columnSchema);
+        return new D1ResultSet(
+                apiToken, accountId, databaseId,
+                Arrays.asList(
+                        Collections.singletonList("TABLE"),
+                        Collections.singletonList("VIEW"),
+                        Collections.singletonList("SYSTEM TABLE")
+                ),
+                Collections.singletonList("TABLE_TYPE"),
+                Collections.singletonList(
+                        new JSONObject().put("type", "TEXT")
+                )
+        );
     }
+
+    // Ref: https://github.com/xerial/sqlite-jdbc/blob/master/src/main/java/org/sqlite/jdbc3/JDBC3DatabaseMetaData.java
+    protected static final Pattern TYPE_INTEGER = Pattern.compile(".*(INT|BOOL).*");
+    protected static final Pattern TYPE_VARCHAR = Pattern.compile(".*(CHAR|CLOB|TEXT|BLOB).*");
+    protected static final Pattern TYPE_FLOAT = Pattern.compile(".*(REAL|FLOA|DOUB|DEC|NUM).*");
 
     @Override
     public ResultSet getColumns(String catalog, String schemaPattern, String tableNamePattern, String columnNamePattern) throws SQLException {
-        if(tableNamePattern.length() == 0) {
+        if (tableNamePattern.isEmpty()) {
             return null;
         }
-        System.out.println(tableNamePattern);
-        System.out.println("PRAGMA table_info(" + tableNamePattern.replaceAll("\\\\", "") + ")");
-        String command = "PRAGMA table_info(" + tableNamePattern.replaceAll("\\\\", "") + ")";
-        JSONObject json = queryDatabase(command);
+
+        // Names are auto-escaped so unescape them.
+        String unescapedName = tableNamePattern.replaceAll("\\\\", "");
+
+        String command = "PRAGMA table_info(" + unescapedName + ")";
+        System.out.println("Running introspection for: " + unescapedName);
+        System.out.println(command);
+        JSONObject json = queryDatabase(command, null);
         JSONArray results = json.getJSONArray("results");
 
-        ArrayList<String> columnNames = new ArrayList<>();
-        ArrayList<ArrayList<Object>> rows = new ArrayList<>();
+        List<String> columnNames = Arrays.asList(
+                "TABLE_CAT",
+                "TABLE_SCHEM",
+                "TABLE_NAME",
+                "COLUMN_NAME",
+                "DATA_TYPE",
+                "TYPE_NAME",
+                "COLUMN_SIZE",
+                "BUFFER_LENGTH",
+                "DECIMAL_DIGITS",
+                "NUM_PREC_RADIX",
+                "NULLABLE",
+                "REMARKS",
+                "COLUMN_DEF",
+                "SQL_DATA_TYPE",
+                "SQL_DATETIME_SUB",
+                "CHAR_OCTET_LENGTH",
+                "ORDINAL_POSITION",
+                "IS_NULLABLE",
+                "SCOPE_CATLOG",
+                "SCOPE_SCHEMA",
+                "SCOPE_TABLE",
+                "SOURCE_DATA_TYPE",
+                "IS_AUTOINCREMENT",
+                "IS_GENERATEDCOLUMN"
+        );
 
-        columnNames.add("TABLE_CAT");
-        columnNames.add("TABLE_SCHEM");
-        columnNames.add("TABLE_NAME");
-        columnNames.add("COLUMN_NAME");
-        columnNames.add("DATA_TYPE");
-        columnNames.add("TYPE_NAME");
-        columnNames.add("COLUMN_SIZE");
-        columnNames.add("BUFFER_LENGTH");
-        columnNames.add("DECIMAL_DIGITS");
-        columnNames.add("NUM_PREC_RADIX");
-        columnNames.add("NULLABLE");
-        columnNames.add("REMARKS");
-        columnNames.add("COLUMN_DEF");
-        columnNames.add("SQL_DATA_TYPE");
-        columnNames.add("SQL_DATETIME_SUB");
-        columnNames.add("CHAR_OCTET_LENGTH");
-        columnNames.add("ORDINAL_POSITION");
-        columnNames.add("IS_NULLABLE");
-        columnNames.add("SCOPE_CATLOG");
-        columnNames.add("SCOPE_SCHEMA");
-        columnNames.add("SCOPE_TABLE");
-        columnNames.add("SOURCE_DATA_TYPE");
-        columnNames.add("IS_AUTOINCREMENT");
-        columnNames.add("IS_GENERATEDCOLUMN");
-
+        List<List<Object>> rows = new ArrayList<>();
         for (int i = 0; i < results.length(); i++) {
             JSONObject column = results.getJSONObject(i);
-            ArrayList<Object> row = new ArrayList<>();
+            List<Object> row = new ArrayList<>();
 
-            // TABLE_CAT
-            row.add(null);
-            // TABLE_SCHEM
-            row.add(null);
-            // TABLE_NAME
-            row.add(tableNamePattern);
-            // COLUMN_NAME
-            row.add(column.getString("name"));
+            row.add(null); // TABLE_CAT
+            row.add(null); // TABLE_SCHEM
+            row.add(unescapedName); // TABLE_NAME
+            row.add(column.getString("name")); // COLUMN_NAME
+
             // DATA_TYPE
-            String type = column.getString("type");
-            if (type.contains("CHAR") || type.contains("CLOB") || type.contains("TEXT")) {
-                row.add(Types.VARCHAR);
-            } else if (type.contains("INT")) {
+            if (TYPE_INTEGER.matcher(column.getString("type")).matches()) {
                 row.add(Types.INTEGER);
-            } else if (type.contains("REAL") || type.contains("DOB") || type.contains("FLOA")) {
+            } else if (TYPE_VARCHAR.matcher(column.getString("type")).matches()) {
+                row.add(Types.VARCHAR);
+            } else if (TYPE_FLOAT.matcher(column.getString("type")).matches()) {
                 row.add(Types.DOUBLE);
-            } else if (type.contains("BLOB") || type.length() == 0) {
-                row.add(Types.BLOB);
             } else {
                 row.add(Types.NUMERIC);
             }
-            // TYPE_NAME
-            row.add(column.getString("type"));
-            // COLUMN_SIZE
-            row.add(null);
-            // BUFFER_LENGTH
-            row.add(null);
-            // DECIMAL_DIGITS
-            row.add(null);
-            // NUM_PREC_RADIX
-            row.add(null);
-            // NULLABLE
-            row.add(column.getInt("notnull") == 0 ? columnNullable : columnNoNulls);
-            // REMARKS
-            row.add(null);
+
+            row.add(column.getString("type")); // TYPE_NAME
+            row.add(null); // COLUMN_SIZE
+            row.add(null); // BUFFER_LENGTH
+            row.add(null); // DECIMAL_DIGITS
+            row.add(null); // NUM_PREC_RADIX
+            row.add(column.getInt("notnull") == 0 ? columnNullable : columnNoNulls); // NULLABLE
+            row.add(null); // REMARKS
+
             // COLUMN_DEF
             Object columnDef = column.get("dflt_value");
             if (columnDef == JSONObject.NULL) {
                 row.add(null);
             } else {
-                if(type.contains("REAL") || type.contains("DOB") || type.contains("FLOA") || type.contains("INT")) {
+                String type = column.getString("type");
+                if (TYPE_INTEGER.matcher(type).matches() || TYPE_FLOAT.matcher(type).matches()) {
                     row.add(columnDef.toString());
                 } else {
                     row.add("'" + columnDef.toString() + "'");
                 }
             }
-            // SQL_DATA_TYPE
-            row.add(null);
-            // SQL_DATETIME_SUB
-            row.add(null);
-            // CHAR_OCTET_LENGTH
-            row.add(null);
-            // ORDINAL_POSITION
-            row.add(i + 1);
-            // IS_NULLABLE
-            row.add(column.getInt("notnull") == 0 ? "YES" : "NO");
-            // SCOPE_CATLOG
-            row.add(null);
-            // SCOPE_SCHEMA
-            row.add(null);
-            // SCOPE_TABLE
-            row.add(null);
-            // SOURCE_DATA_TYPE
-            row.add(null);
-            // IS_AUTOINCREMENT
-            row.add("");
-            // IS_GENERATEDCOLUMN
-            row.add("");
+
+            row.add(null); // SQL_DATA_TYPE
+            row.add(null); // SQL_DATETIME_SUB
+            row.add(null); // CHAR_OCTET_LENGTH
+            row.add(i + 1); // ORDINAL_POSITION
+            row.add(column.getInt("notnull") == 0 ? "YES" : "NO"); // IS_NULLABLE
+            row.add(null); // SCOPE_CATLOG
+            row.add(null); // SCOPE_SCHEMA
+            row.add(null); // SCOPE_TABLE
+            row.add(null); // SOURCE_DATA_TYPE
+            row.add(""); // IS_AUTOINCREMENT
+            row.add(""); // IS_GENERATEDCOLUMN
 
             rows.add(row);
         }
 
-        JSONObject stringType = new JSONObject();
-        stringType.put("type", "TEXT");
-        JSONObject intType = new JSONObject();
-        intType.put("type", "INTEGER");
+        List<JSONObject> columnSchema = Arrays.asList(
+                new JSONObject().put("type", "TEXT"), // TABLE_CAT
+                new JSONObject().put("type", "TEXT"), // TABLE_SCHEM
+                new JSONObject().put("type", "TEXT"), // TABLE_NAME
+                new JSONObject().put("type", "TEXT"), // COLUMN_NAME
+                new JSONObject().put("type", "INTEGER"), // DATA_TYPE
+                new JSONObject().put("type", "TEXT"), // TYPE_NAME
+                new JSONObject().put("type", "INTEGER"), // COLUMN_SIZE
+                new JSONObject().put("type", "INTEGER"), // BUFFER_LENGTH
+                new JSONObject().put("type", "INTEGER"), // DECIMAL_DIGITS
+                new JSONObject().put("type", "INTEGER"), // NUM_PREC_RADIX
+                new JSONObject().put("type", "INTEGER"), // NULLABLE
+                new JSONObject().put("type", "TEXT"), // REMARKS
+                new JSONObject().put("type", "TEXT"), // COLUMN_DEF
+                new JSONObject().put("type", "INTEGER"), // SQL_DATA_TYPE
+                new JSONObject().put("type", "INTEGER"), // SQL_DATETIME_SUB
+                new JSONObject().put("type", "INTEGER"), // CHAR_OCTET_LENGTH
+                new JSONObject().put("type", "INTEGER"), // ORDINAL_POSITION
+                new JSONObject().put("type", "TEXT"), // IS_NULLABLE
+                new JSONObject().put("type", "TEXT"), // SCOPE_CATLOG
+                new JSONObject().put("type", "TEXT"), // SCOPE_SCHEMA
+                new JSONObject().put("type", "TEXT"), // SCOPE_TABLE
+                new JSONObject().put("type", "INTEGER"), // SOURCE_DATA_TYPE
+                new JSONObject().put("type", "TEXT"), // IS_AUTOINCREMENT
+                new JSONObject().put("type", "TEXT") // IS_GENERATEDCOLUMN
+        );
 
-        JSONArray columnSchema = new JSONArray();
-        // TABLE_CAT
-        columnSchema.put(stringType);
-        // TABLE_SCHEM
-        columnSchema.put(stringType);
-        // TABLE_NAME
-        columnSchema.put(stringType);
-        // COLUMN_NAME
-        columnSchema.put(stringType);
-        // DATA_TYPE
-        columnSchema.put(intType);
-        // TYPE_NAME
-        columnSchema.put(stringType);
-        // COLUMN_SIZE
-        columnSchema.put(intType);
-        // BUFFER_LENGTH
-        columnSchema.put(intType);
-        // DECIMAL_DIGITS
-        columnSchema.put(intType);
-        // NUM_PREC_RADIX
-        columnSchema.put(intType);
-        // NULLABLE
-        columnSchema.put(intType);
-        // REMARKS
-        columnSchema.put(stringType);
-        // COLUMN_DEF
-        columnSchema.put(stringType);
-        // SQL_DATA_TYPE
-        columnSchema.put(intType);
-        // SQL_DATETIME_SUB
-        columnSchema.put(intType);
-        // CHAR_OCTET_LENGTH
-        columnSchema.put(intType);
-        // ORDINAL_POSITION
-        columnSchema.put(intType);
-        // IS_NULLABLE
-        columnSchema.put(stringType);
-        // SCOPE_CATLOG
-        columnSchema.put(stringType);
-        // SCOPE_SCHEMA
-        columnSchema.put(stringType);
-        // SCOPE_TABLE
-        columnSchema.put(stringType);
-        // SOURCE_DATA_TYPE
-        columnSchema.put(intType);
-        // IS_AUTOINCREMENT
-        columnSchema.put(stringType);
-        // IS_GENERATEDCOLUMN
-        columnSchema.put(stringType);
-
-        return new D1ResultSet(ApiKey, AccountId, DatabaseUuid, columnNames, rows, columnSchema);
+        return new D1ResultSet(apiToken, accountId, databaseId, rows, columnNames, columnSchema);
     }
 
     @Override
@@ -904,7 +892,7 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public ResultSet getPrimaryKeys(String catalog, String schema, String table) throws SQLException {
-        JSONObject results = queryDatabase("PRAGMA table_info(" + table + ")");
+        JSONObject results = queryDatabase("PRAGMA table_info(" + table + ")", null);
         JSONArray columns = results.getJSONArray("results");
 
         // Find the column labelled PrimaryKey.
@@ -916,49 +904,38 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
                 break;
             }
         }
-
-        if(primaryKeyColumn == null) {
+        if (primaryKeyColumn == null) {
             return null;
         }
 
-        ArrayList<String> columnNames = new ArrayList<>();
-        columnNames.add("TABLE_CAT");
-        columnNames.add("TABLE_SCHEM");
-        columnNames.add("TABLE_NAME");
-        columnNames.add("COLUMN_NAME");
-        columnNames.add("KEY_SEQ");
-        columnNames.add("PK_NAME");
+        List<String> columnNames = Arrays.asList(
+                "TABLE_CAT",
+                "TABLE_SCHEM",
+                "TABLE_NAME",
+                "COLUMN_NAME",
+                "KEY_SEQ",
+                "PK_NAME"
+        );
+        List<List<Object>> rows = Collections.singletonList(
+                Arrays.asList(
+                        null, // TABLE_CAT
+                        null, // TABLE_SCHEM
+                        table, // TABLE_NAME
+                        primaryKeyColumn.getString("name"), // COLUMN_NAME
+                        1, // KEY_SEQ
+                        primaryKeyColumn.getString("name") // PK_NAME
+                )
+        );
+        List<JSONObject> columnSchema = Arrays.asList(
+                new JSONObject().put("type", "TEXT"), // TABLE_CAT
+                new JSONObject().put("type", "TEXT"), // TABLE_SCHEM
+                new JSONObject().put("type", "TEXT"), // TABLE_NAME
+                new JSONObject().put("type", "TEXT"), // COLUMN_NAME
+                new JSONObject().put("type", "INTEGER"), // KEY_SEQ
+                new JSONObject().put("type", "TEXT") // PK_NAME
+        );
 
-        ArrayList<ArrayList<Object>> rows = new ArrayList<>();
-        ArrayList<Object> row = new ArrayList<>();
-        row.add(null);
-        row.add(null);
-        row.add(table);
-        row.add(primaryKeyColumn.getString("name"));
-        row.add(1);
-        row.add(primaryKeyColumn.getString("name"));
-        rows.add(row);
-
-        JSONObject stringType = new JSONObject();
-        stringType.put("type", "TEXT");
-        JSONObject intType = new JSONObject();
-        intType.put("type", "INTEGER");
-
-        JSONArray columnSchema = new JSONArray();
-        // TABLE_CAT
-        columnSchema.put(stringType);
-        // TABLE_SCHEM
-        columnSchema.put(stringType);
-        // TABLE_NAME
-        columnSchema.put(stringType);
-        // COLUMN_NAME
-        columnSchema.put(stringType);
-        // KEY_SEQ
-        columnSchema.put(intType);
-        // PK_NAME
-        columnSchema.put(stringType);
-
-        return new D1ResultSet(ApiKey, AccountId, DatabaseUuid, columnNames, rows, columnSchema);
+        return new D1ResultSet(apiToken, accountId, databaseId, rows, columnNames, columnSchema);
     }
 
     @Override
@@ -973,53 +950,42 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public ResultSet getCrossReference(String parentCatalog, String parentSchema, String parentTable, String foreignCatalog, String foreignSchema, String foreignTable) throws SQLException {
-        ArrayList<String> columnNames = new ArrayList<>();
-        columnNames.add("PKTABLE_CAT");
-        columnNames.add("PKTABLE_SCHEM");
-        columnNames.add("PKTABLE_NAME");
-        columnNames.add("PKCOLUMN_NAME");
-        columnNames.add("FKTABLE_CAT");
-        columnNames.add("FKTABLE_SCHEM");
-        columnNames.add("FKTABLE_NAME");
-        columnNames.add("FKCOLUMN_NAME");
-        columnNames.add("KEY_SEQ");
-        columnNames.add("UPDATE_RULE");
-        columnNames.add("DELETE_RULE");
-        columnNames.add("FK_NAME");
-        columnNames.add("PK_NAME");
+        List<String> columnNames = Arrays.asList(
+                "PKTABLE_CAT",
+                "PKTABLE_SCHEM",
+                "PKTABLE_NAME",
+                "PKCOLUMN_NAME",
+                "FKTABLE_CAT",
+                "FKTABLE_SCHEM",
+                "FKTABLE_NAME",
+                "FKCOLUMN_NAME",
+                "KEY_SEQ",
+                "UPDATE_RULE",
+                "DELETE_RULE",
+                "FK_NAME",
+                "PK_NAME"
+        );
+
+        List<JSONObject> columnSchema = Arrays.asList(
+                new JSONObject().put("type", "TEXT"), // PKTABLE_CAT
+                new JSONObject().put("type", "TEXT"), // PKTABLE_SCHEM
+                new JSONObject().put("type", "TEXT"), // PKTABLE_NAME
+                new JSONObject().put("type", "TEXT"), // PKCOLUMN_NAME
+                new JSONObject().put("type", "TEXT"), // FKTABLE_CAT
+                new JSONObject().put("type", "TEXT"), // FKTABLE_SCHEM
+                new JSONObject().put("type", "TEXT"), // FKTABLE_NAME
+                new JSONObject().put("type", "TEXT"), // FKCOLUMN_NAME
+                new JSONObject().put("type", "INTEGER"), // KEY_SEQ
+                new JSONObject().put("type", "INTEGER"), // UPDATE_RULE
+                new JSONObject().put("type", "INTEGER"), // DELETE_RULE
+                new JSONObject().put("type", "TEXT"), // FK_NAME
+                new JSONObject().put("type", "TEXT") // PK_NAME
+        );
 
         JSONObject stringType = new JSONObject();
         stringType.put("type", "TEXT");
         JSONObject intType = new JSONObject();
         intType.put("type", "INTEGER");
-
-        JSONArray columnSchema = new JSONArray();
-        // PKTABLE_CAT
-        columnSchema.put(stringType);
-        // PKTABLE_SCHEM
-        columnSchema.put(stringType);
-        // PKTABLE_NAME
-        columnSchema.put(stringType);
-        // PKCOLUMN_NAME
-        columnSchema.put(stringType);
-        // FKTABLE_CAT
-        columnSchema.put(stringType);
-        // FKTABLE_SCHEM
-        columnSchema.put(stringType);
-        // FKTABLE_NAME
-        columnSchema.put(stringType);
-        // FKCOLUMN_NAME
-        columnSchema.put(stringType);
-        // KEY_SEQ
-        columnSchema.put(intType);
-        // UPDATE_RULE
-        columnSchema.put(intType);
-        // DELETE_RULE
-        columnSchema.put(intType);
-        // FK_NAME
-        columnSchema.put(stringType);
-        // PK_NAME
-        columnSchema.put(stringType);
 
         JSONObject ruleType = new JSONObject();
         ruleType.put("NO ACTION", DatabaseMetaData.importedKeyNoAction);
@@ -1028,25 +994,25 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
         ruleType.put("SET DEFAULT", DatabaseMetaData.importedKeySetDefault);
         ruleType.put("RESTRICT", DatabaseMetaData.importedKeyRestrict);
 
-        JSONObject results = queryDatabase("PRAGMA foreign_key_list(" + foreignTable + ")");
+        JSONObject results = queryDatabase("PRAGMA foreign_key_list(" + foreignTable + ")", null);
         JSONArray fkList = results.getJSONArray("results");
-        ArrayList<ArrayList<Object>> rows = new ArrayList<>();
 
+        List<List<Object>> rows = new ArrayList<>();
         for (int i = 0; i < fkList.length(); i++) {
             JSONObject fkItem = fkList.getJSONObject(i);
 
-            ArrayList<Object> row = new ArrayList<>();
-            row.add(null);
-            row.add(null);
-            row.add(fkItem.get("table"));
-            row.add(fkItem.get("to"));
-            row.add(null);
-            row.add(null);
-            row.add(foreignTable);
-            row.add(fkItem.get("from"));
-            row.add(fkItem.get("seq"));
-            row.add(ruleType.get(fkItem.get("on_update").toString()));
-            row.add(ruleType.get(fkItem.get("on_delete").toString()));
+            List<Object> row = new ArrayList<>();
+            row.add(null); // PKTABLE_CAT
+            row.add(null); // PKTABLE_SCHEM
+            row.add(fkItem.get("table")); // PKTABLE_NAME
+            row.add(fkItem.get("to")); // PKCOLUMN_NAME
+            row.add(null); // FKTABLE_CAT
+            row.add(null); // FKTABLE_SCHEM
+            row.add(foreignTable); // FKTABLE_NAME
+            row.add(fkItem.get("from")); // FKCOLUMN_NAME
+            row.add(fkItem.get("seq")); // KEY_SEQ
+            row.add(ruleType.get(fkItem.get("on_update").toString())); // UPDATE_RULE
+            row.add(ruleType.get(fkItem.get("on_delete").toString())); // DELETE_RULE
 
             // If null is set, #FAKE_<table>_<number> is set, so <foreignTable>_<id>_<seq> set
             row.add(foreignTable + "_" + fkItem.get("id").toString() + "_" + fkItem.get("seq").toString());
@@ -1055,7 +1021,7 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
             rows.add(row);
         }
 
-        return new D1ResultSet(ApiKey, AccountId, DatabaseUuid, columnNames, rows, columnSchema);
+        return new D1ResultSet(apiToken, accountId, databaseId, rows, columnNames, columnSchema);
     }
 
     @Override
@@ -1070,7 +1036,7 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public boolean supportsResultSetType(int type) throws SQLException {
-        return false;
+        return type == ResultSet.TYPE_FORWARD_ONLY;
     }
 
     @Override
@@ -1135,7 +1101,7 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public Connection getConnection() throws SQLException {
-        return null;
+        return this.parentConnection;
     }
 
     @Override
@@ -1170,7 +1136,55 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public ResultSet getAttributes(String catalog, String schemaPattern, String typeNamePattern, String attributeNamePattern) throws SQLException {
-        return null;
+        return D1ResultSet.empty(
+                apiToken, accountId, databaseId,
+                Arrays.asList(
+                        "TYPE_CAT",
+                        "TYPE_SCHEM",
+                        "TYPE_NAME",
+                        "ATTR_NAME",
+                        "DATA_TYPE",
+                        "ATTR_TYPE_NAME",
+                        "ATTR_SIZE",
+                        "DECIMAL_DIGITS",
+                        "NUM_PREC_RADIX",
+                        "NULLABLE",
+                        "REMARKS",
+                        "ATTR_DEF",
+                        "SQL_DATA_TYPE",
+                        "SQL_DATETIME_SUB",
+                        "CHAR_OCTET_LENGTH",
+                        "ORDINAL_POSITION",
+                        "IS_NULLABLE",
+                        "SCOPE_CATALOG",
+                        "SCOPE_SCHEMA",
+                        "SCOPE_TABLE",
+                        "SOURCE_DATA_TYPE"
+                ),
+                Arrays.asList(
+                        new JSONObject().put("type", "TEXT"), // TYPE_CAT
+                        new JSONObject().put("type", "TEXT"), // TYPE_SCHEM
+                        new JSONObject().put("type", "TEXT"), // TYPE_NAME
+                        new JSONObject().put("type", "TEXT"), // ATTR_NAME
+                        new JSONObject().put("type", "INTEGER"), // DATA_TYPE
+                        new JSONObject().put("type", "TEXT"), // ATTR_TYPE_NAME
+                        new JSONObject().put("type", "INTEGER"), // ATTR_SIZE
+                        new JSONObject().put("type", "INTEGER"), // DECIMAL_DIGITS
+                        new JSONObject().put("type", "INTEGER"), // NUM_PREC_RADIX
+                        new JSONObject().put("type", "INTEGER"), // NULLABLE
+                        new JSONObject().put("type", "TEXT"), // REMARKS
+                        new JSONObject().put("type", "TEXT"), // ATTR_DEF
+                        new JSONObject().put("type", "INTEGER"), // SQL_DATA_TYPE
+                        new JSONObject().put("type", "INTEGER"), // SQL_DATETIME_SUB
+                        new JSONObject().put("type", "INTEGER"), // CHAR_OCTET_LENGTH
+                        new JSONObject().put("type", "INTEGER"), // ORDINAL_POSITION
+                        new JSONObject().put("type", "TEXT"), // IS_NULLABLE
+                        new JSONObject().put("type", "TEXT"), // SCOPE_CATALOG
+                        new JSONObject().put("type", "TEXT"), // SCOPE_SCHEMA
+                        new JSONObject().put("type", "TEXT"), // SCOPE_TABLE
+                        new JSONObject().put("type", "INTEGER") // SOURCE_DATA_TYPE
+                )
+        );
     }
 
     @Override
@@ -1220,22 +1234,29 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public RowIdLifetime getRowIdLifetime() throws SQLException {
-        return null;
+        throw new SQLFeatureNotSupportedException();
     }
 
     @Override
     public ResultSet getSchemas(String catalog, String schemaPattern) throws SQLException {
-        return null;
+        return D1ResultSet.empty(
+                apiToken, accountId, databaseId,
+                Arrays.asList("TABLE_SCHEM", "TABLE_CATALOG"),
+                Arrays.asList(
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "TEXT")
+                )
+        );
     }
 
     @Override
     public boolean supportsStoredFunctionsUsingCallSyntax() throws SQLException {
-        return false;
+        throw new SQLFeatureNotSupportedException();
     }
 
     @Override
     public boolean autoCommitFailureClosesAllResultSets() throws SQLException {
-        return false;
+        throw new SQLFeatureNotSupportedException();
     }
 
     @Override
@@ -1245,22 +1266,80 @@ public class D1DatabaseMetaData extends D1Queryable implements DatabaseMetaData 
 
     @Override
     public ResultSet getFunctions(String catalog, String schemaPattern, String functionNamePattern) throws SQLException {
-        return null;
+        return D1ResultSet.empty(
+                apiToken, accountId, databaseId,
+                Arrays.asList(
+                        "FUNCTION_CAT",
+                        "FUNCTION_SCHEM",
+                        "FUNCTION_NAME",
+                        "REMARKS",
+                        "FUNCTION_TYPE",
+                        "SPECIFIC_NAME"
+                ),
+                Arrays.asList(
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "TEXT")
+                )
+        );
     }
 
     @Override
     public ResultSet getFunctionColumns(String catalog, String schemaPattern, String functionNamePattern, String columnNamePattern) throws SQLException {
-        return null;
+        return D1ResultSet.empty(
+                apiToken, accountId, databaseId,
+                Arrays.asList(
+                        "FUNCTION_CAT",
+                        "FUNCTION_SCHEM",
+                        "FUNCTION_NAME",
+                        "COLUMN_NAME",
+                        "COLUMN_TYPE",
+                        "DATA_TYPE",
+                        "TYPE_NAME",
+                        "PRECISION",
+                        "LENGTH",
+                        "SCALE",
+                        "RADIX",
+                        "NULLABLE",
+                        "REMARKS",
+                        "CHAR_OCTET_LENGTH",
+                        "ORDINAL_POSITION",
+                        "IS_NULLABLE",
+                        "SPECIFIC_NAME"
+                ),
+                Arrays.asList(
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "INTEGER"),
+                        new JSONObject().put("type", "TEXT"),
+                        new JSONObject().put("type", "TEXT")
+                )
+        );
     }
 
     @Override
     public ResultSet getPseudoColumns(String catalog, String schemaPattern, String tableNamePattern, String columnNamePattern) throws SQLException {
-        return null;
+        throw new SQLFeatureNotSupportedException();
     }
 
     @Override
     public boolean generatedKeyAlwaysReturned() throws SQLException {
-        return false;
+        throw new SQLFeatureNotSupportedException();
     }
 
     @Override

@@ -16,7 +16,7 @@
 
     <groupId>org.isaacmcfadyen</groupId>
     <artifactId>d1-jdbc-driver</artifactId>
-    <version>1.1.1</version>
+    <version>1.2.1</version>
     <packaging>jar</packaging>
 
     <properties>
@@ -28,12 +28,12 @@
         <dependency>
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
-            <version>20220320</version>
+            <version>20240303</version>
         </dependency>
         <dependency>
             <groupId>com.github.jsqlparser</groupId>
             <artifactId>jsqlparser</artifactId>
-            <version>4.4</version>
+            <version>4.9</version>
         </dependency>
     </dependencies>
 
@@ -56,7 +56,7 @@
                         </configuration>
                     </execution>
                 </executions>
-            </plugin>
+            </plugin><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><source>8</source><target>8</target></configuration></plugin>
         </plugins>
     </build>
 </project>

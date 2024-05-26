@@ -1,38 +1,37 @@
 package org.isaacmcfadyen;
 
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
-import net.sf.jsqlparser.statement.Statement;
-import net.sf.jsqlparser.statement.select.Select;
-import net.sf.jsqlparser.util.TablesNamesFinder;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.lang.reflect.Type;
-import java.sql.Array;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Types;
-import java.util.ArrayList;
-import java.util.Iterator;
+import java.util.List;
 import java.util.Objects;
 
 public class D1ResultSetMetaData extends D1Queryable implements ResultSetMetaData {
-    private final ArrayList<String> columnNames;
-    private final ArrayList<ArrayList<Object>> rows;
-    private JSONArray columnSchema = new JSONArray();
+    private final List<String> columnNames;
+    private final List<List<Object>> rows;
+    private final List<JSONObject> columnSchema;
+    private String tableName = null;
 
     D1ResultSetMetaData(
             String ApiKey,
             String AccountId,
             String DatabaseUuid,
-            ArrayList<String> columns,
-            ArrayList<ArrayList<Object>> rows,
-            JSONArray columnSchema
+            List<String> columns,
+            List<List<Object>> rows,
+            List<JSONObject> columnSchema
     ) throws SQLException {
         super(ApiKey, AccountId, DatabaseUuid);
         this.columnNames = columns;
         this.rows = rows;
         this.columnSchema = columnSchema;
+    }
+
+    // Sets the table name that this query originated from.
+    public void setTableName(String tableName) {
+        this.tableName = tableName;
     }
 
 
@@ -49,7 +48,10 @@ public class D1ResultSetMetaData extends D1Queryable implements ResultSetMetaDat
 
     @Override
     public boolean isCaseSensitive(int column) throws SQLException {
-        JSONObject columnSchema = this.columnSchema.getJSONObject(column - 1);
+        JSONObject columnSchema = this.columnSchema.get(column - 1);
+        if (columnSchema == null) {
+            throw new SQLException("Column not found");
+        }
         String columnType = columnSchema.getString("type");
         return columnType.equals("TEXT")
                 || columnType.contains("CHAR")
@@ -68,7 +70,10 @@ public class D1ResultSetMetaData extends D1Queryable implements ResultSetMetaDat
 
     @Override
     public int isNullable(int column) throws SQLException {
-        JSONObject columnSchema = this.columnSchema.getJSONObject(column - 1);
+        JSONObject columnSchema = this.columnSchema.get(column - 1);
+        if (columnSchema == null) {
+            throw new SQLException("Column not found");
+        }
         return columnSchema.getInt("notnull") == 0 ?
                 ResultSetMetaData.columnNullable
                 : ResultSetMetaData.columnNoNulls;
@@ -76,19 +81,21 @@ public class D1ResultSetMetaData extends D1Queryable implements ResultSetMetaDat
 
     @Override
     public boolean isSigned(int column) throws SQLException {
-
-        JSONObject columnSchema = this.columnSchema.getJSONObject(column - 1);
+        JSONObject columnSchema = this.columnSchema.get(column - 1);
+        if (columnSchema == null) {
+            throw new SQLException("Column not found");
+        }
         String type = columnSchema.getString("type");
         return !Objects.equals(type, "TEXT")
                 && !type.contains("CHAR")
                 && !type.contains("BLOB")
-                && type.length() > 0;
+                && !type.isEmpty();
     }
 
     @Override
     public int getColumnDisplaySize(int column) throws SQLException {
         int longestLength = 0;
-        for (ArrayList<Object> row : rows) {
+        for (List<Object> row : rows) {
             if (row.get(column).toString().length() > longestLength) {
                 longestLength = row.get(column).toString().length();
             }
@@ -108,7 +115,7 @@ public class D1ResultSetMetaData extends D1Queryable implements ResultSetMetaDat
 
     @Override
     public String getSchemaName(int column) throws SQLException {
-        return null;
+        return "";
     }
 
     @Override
@@ -118,7 +125,7 @@ public class D1ResultSetMetaData extends D1Queryable implements ResultSetMetaDat
 
     @Override
     public int getScale(int column) throws SQLException {
-        ArrayList<Object> row = rows.get(0);
+        List<Object> row = rows.get(0);
         Object value = row.get(column - 1);
         Type type = value.getClass();
 
@@ -131,26 +138,33 @@ public class D1ResultSetMetaData extends D1Queryable implements ResultSetMetaDat
 
     @Override
     public String getTableName(int column) throws SQLException {
-        return null;
+        if (tableName == null) {
+            // JDBC specifies an empty string instead of null
+            return "";
+        }
+        return tableName;
     }
 
     @Override
     public String getCatalogName(int column) throws SQLException {
-        return null;
+        return tableName;
     }
 
     @Override
     public int getColumnType(int column) throws SQLException {
-        JSONObject columnSchema = this.columnSchema.getJSONObject(column - 1);
-        String type = columnSchema.getString("type");
+        JSONObject columnSchema = this.columnSchema.get(column - 1);
+        if (columnSchema == null) {
+            throw new SQLException("Column not found");
+        }
 
+        String type = columnSchema.getString("type");
         if (type.contains("CHAR") || type.contains("CLOB") || type.contains("TEXT")) {
             return Types.VARCHAR;
         } else if (type.contains("INT")) {
             return Types.INTEGER;
         } else if (type.contains("REAL") || type.contains("DOB") || type.contains("FLOA")) {
             return Types.DOUBLE;
-        } else if (type.contains("BLOB") || type.length() == 0) {
+        } else if (type.contains("BLOB") || type.isEmpty()) {
             return Types.BLOB;
         } else {
             return Types.NUMERIC;
@@ -159,7 +173,10 @@ public class D1ResultSetMetaData extends D1Queryable implements ResultSetMetaDat
 
     @Override
     public String getColumnTypeName(int column) throws SQLException {
-        JSONObject columnSchema = this.columnSchema.getJSONObject(column - 1);
+        JSONObject columnSchema = this.columnSchema.get(column - 1);
+        if (columnSchema == null) {
+            throw new SQLException("Column not found");
+        }
         return columnSchema.getString("type");
     }
 
